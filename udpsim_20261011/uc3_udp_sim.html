@@ -1,0 +1,653 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+</head>
+<body>
+<title>μC3/μNet3 UDPシミュレータ</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=BIZ+UDPGothic:wght@400;700&family=Chakra+Petch:wght@500;600&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: 2台の機器を左右に並べるベンチ。左=基板(はんだマスクの緑)、右=受信機(解析画面)。狭い画面では縦積み */
+:root{
+  --bg:#e9ede9; --panel:#fbfcfb; --fg:#17201b; --muted:#5a6660; --line:#cdd6d0;
+  --accent:#1d6b47; --accent-fg:#ffffff;
+  --pcb:#164a33; --pcb-edge:#0e3122; --silk:#e9f2ec; --copper:#c9a35c;
+  --led-off:#4a1a17; --led-on:#ff4434; --led-glow:rgba(255,68,52,.55);
+  --ok:#17804d; --ok-bg:#dff3e7; --ng:#b3261e; --ng-bg:#fbe3e1; --wait:#8a6a12; --wait-bg:#f6edd2;
+  --r-eth:#2f5fb3; --r-ip:#7a4bb0; --r-udp:#0f7f86; --r-data:#a35f00; --r-fcs:#6b6f73;
+  --r-eth-bg:#e3ebfa; --r-ip-bg:#eee5f8; --r-udp-bg:#dcf1f2; --r-data-bg:#f8ebd6; --r-fcs-bg:#eceeef;
+  --f-ui:"BIZ UDPGothic","Hiragino Sans","Yu Gothic UI","Meiryo",system-ui,sans-serif;
+  --f-label:"Chakra Petch","BIZ UDPGothic","Yu Gothic UI",system-ui,sans-serif;
+  --f-mono:"JetBrains Mono","Consolas","BIZ UDGothic",ui-monospace,monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#121614; --panel:#1a201d; --fg:#e4ebe6; --muted:#97a39c; --line:#2e3833;
+  --accent:#4fbf89; --accent-fg:#06140d;
+  --pcb:#123f2b; --pcb-edge:#0a2619; --silk:#e1ece5; --copper:#b8955a;
+  --led-off:#3a1513; --led-on:#ff5747; --led-glow:rgba(255,87,71,.6);
+  --ok:#5fd394; --ok-bg:#163526; --ng:#ff8a80; --ng-bg:#3d1b19; --wait:#e8c35a; --wait-bg:#3a3114;
+  --r-eth:#8fb3ff; --r-ip:#c7a3f5; --r-udp:#6fd6dc; --r-data:#f2b45c; --r-fcs:#a9adb1;
+  --r-eth-bg:#1c2741; --r-ip-bg:#2a1f3b; --r-udp-bg:#14302f; --r-data-bg:#36290f; --r-fcs-bg:#26292b;
+  color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#121614; --panel:#1a201d; --fg:#e4ebe6; --muted:#97a39c; --line:#2e3833;
+  --accent:#4fbf89; --accent-fg:#06140d;
+  --pcb:#123f2b; --pcb-edge:#0a2619; --silk:#e1ece5; --copper:#b8955a;
+  --led-off:#3a1513; --led-on:#ff5747; --led-glow:rgba(255,87,71,.6);
+  --ok:#5fd394; --ok-bg:#163526; --ng:#ff8a80; --ng-bg:#3d1b19; --wait:#e8c35a; --wait-bg:#3a3114;
+  --r-eth:#8fb3ff; --r-ip:#c7a3f5; --r-udp:#6fd6dc; --r-data:#f2b45c; --r-fcs:#a9adb1;
+  --r-eth-bg:#1c2741; --r-ip-bg:#2a1f3b; --r-udp-bg:#14302f; --r-data-bg:#36290f; --r-fcs-bg:#26292b;
+  color-scheme:dark}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--fg);font-family:var(--f-ui);font-size:14px;line-height:1.6;margin:0}
+.wrap{max-width:1360px;margin:0 auto;padding-inline:16px;padding-block:16px 40px;display:flex;flex-direction:column;gap:16px}
+h1,h2,h3{margin:0;text-wrap:balance}
+h1{font-family:var(--f-label);font-weight:600;font-size:1.35rem;letter-spacing:.02em}
+h2{font-size:1.05rem;font-weight:700}
+h3{font-size:.85rem;font-weight:700;color:var(--muted);letter-spacing:.04em}
+.mono{font-family:var(--f-mono);font-variant-numeric:tabular-nums}
+.muted{color:var(--muted)}
+button,select{font:inherit;color:inherit}
+button:focus-visible,select:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+/* ヘッダ */
+.bar{display:flex;flex-wrap:wrap;align-items:center;gap:12px 20px;justify-content:space-between}
+.bar .sub{font-size:.85rem;color:var(--muted)}
+.ctrl{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.clock{font-family:var(--f-mono);font-size:1.1rem;font-weight:600;padding:4px 12px;border:1px solid var(--line);border-radius:6px;background:var(--panel);font-variant-numeric:tabular-nums}
+.btn{border:1px solid var(--line);background:var(--panel);padding:6px 14px;border-radius:6px;cursor:pointer}
+.btn:hover{border-color:var(--accent)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-fg);font-weight:700}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:6px;overflow:hidden;background:var(--panel)}
+.seg button{border:0;background:none;padding:6px 10px;cursor:pointer;font-family:var(--f-mono)}
+.seg button[aria-pressed="true"]{background:var(--accent);color:var(--accent-fg)}
+
+.grid{display:grid;grid-template-columns:minmax(0,5fr) minmax(0,7fr);gap:16px;align-items:start}
+@media (max-width:980px){.grid{grid-template-columns:minmax(0,1fr)}}
+.dev{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px;display:flex;flex-direction:column;gap:14px;min-width:0}
+.devhead{display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;gap:4px 12px}
+.tag{font-family:var(--f-label);font-weight:600;font-size:.8rem;letter-spacing:.08em;color:var(--accent)}
+
+/* 基板 */
+.pcb{background:var(--pcb);border:3px solid var(--pcb-edge);border-radius:12px;padding:14px;color:var(--silk);position:relative;display:flex;flex-direction:column;gap:14px}
+.pcb .silk{font-family:var(--f-label);font-size:.72rem;letter-spacing:.1em;text-transform:uppercase;opacity:.9}
+.pcbtop{display:flex;flex-wrap:wrap;gap:10px;justify-content:space-between;align-items:center}
+.chip{display:flex;gap:10px;flex-wrap:wrap}
+.ic{border:1px solid rgba(255,255,255,.25);background:#0b0f0d;color:#cfd8d3;border-radius:4px;padding:6px 10px;font-family:var(--f-mono);font-size:.72rem;line-height:1.35}
+.rj45{display:flex;align-items:center;gap:8px}
+.rj45 .jack{width:44px;height:36px;background:#c9cdd0;border-radius:3px;position:relative;border:1px solid #8b9196}
+.rj45 .jack::after{content:"";position:absolute;left:9px;top:8px;width:24px;height:16px;background:#22272b;border-radius:2px}
+.rj45 .lnk{width:9px;height:9px;border-radius:50%;background:#1f3d2c;position:absolute;top:2px;right:3px;z-index:1}
+.rj45 .lnk.on{background:#38e07a;box-shadow:0 0 6px #38e07a}
+.leds{display:grid;grid-template-columns:repeat(8,minmax(0,1fr));gap:6px}
+.led{display:flex;flex-direction:column;align-items:center;gap:4px}
+.led .lamp{width:26px;height:26px;border-radius:50%;background:var(--led-off);border:2px solid rgba(0,0,0,.35);transition:background .04s,box-shadow .04s}
+.led.on .lamp{background:var(--led-on);box-shadow:0 0 14px 4px var(--led-glow)}
+.led .nm{font-family:var(--f-label);font-weight:600;font-size:.72rem;letter-spacing:.06em}
+.led .fn{font-family:var(--f-mono);font-size:.64rem;opacity:.8;min-height:1em}
+.led button{font-size:.65rem;padding:1px 6px;border-radius:4px;border:1px solid rgba(255,255,255,.35);background:transparent;color:var(--silk);cursor:pointer}
+.led button:hover{background:rgba(255,255,255,.12)}
+@media (max-width:480px){.leds{grid-template-columns:repeat(4,minmax(0,1fr))}}
+
+.kv{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:2px 14px;font-size:.85rem}
+.kv dt{color:var(--muted)}
+.kv dd{margin:0;font-family:var(--f-mono);overflow-wrap:anywhere}
+
+table{border-collapse:collapse;width:100%;font-size:.82rem}
+th,td{text-align:left;padding:4px 8px;border-bottom:1px solid var(--line);vertical-align:top}
+th{font-weight:700;color:var(--muted);font-size:.75rem;letter-spacing:.03em}
+td.num,th.num{text-align:right;font-family:var(--f-mono);font-variant-numeric:tabular-nums}
+.tscroll{overflow-x:auto}
+.pill{display:inline-block;padding:0 8px;border-radius:999px;font-size:.75rem;font-weight:700;white-space:nowrap}
+.pill.ok{background:var(--ok-bg);color:var(--ok)}
+.pill.ng{background:var(--ng-bg);color:var(--ng)}
+.pill.wait{background:var(--wait-bg);color:var(--wait)}
+
+canvas{width:100%;display:block;border:1px solid var(--line);border-radius:6px;background:var(--bg)}
+
+/* 受信機 */
+.rxtop{display:flex;flex-wrap:wrap;gap:10px 24px;align-items:center;justify-content:space-between}
+.count{display:flex;align-items:baseline;gap:8px}
+.count .big{font-family:var(--f-mono);font-size:1.6rem;font-weight:600;font-variant-numeric:tabular-nums}
+.verdict{display:flex;flex-wrap:wrap;gap:8px}
+.frame{border:1px solid var(--line);border-radius:8px;padding:12px;display:flex;flex-direction:column;gap:12px;min-width:0}
+.framehead{display:flex;flex-wrap:wrap;gap:6px 14px;align-items:baseline;justify-content:space-between}
+.legend{display:flex;flex-wrap:wrap;gap:6px}
+.legend span{font-size:.72rem;padding:0 8px;border-radius:4px;font-weight:700}
+.dump{font-family:var(--f-mono);font-size:.78rem;line-height:1.75;overflow-x:auto;white-space:pre;padding:8px 10px;background:var(--bg);border-radius:6px}
+.dump b{font-weight:400;padding:1px 0;border-radius:2px}
+.dump .off{color:var(--muted)}
+.g-eth{background:var(--r-eth-bg);color:var(--r-eth)}
+.g-ip{background:var(--r-ip-bg);color:var(--r-ip)}
+.g-udp{background:var(--r-udp-bg);color:var(--r-udp)}
+.g-data{background:var(--r-data-bg);color:var(--r-data)}
+.g-cnt{background:var(--r-data);color:var(--panel);font-weight:600}
+.g-fcs{background:var(--r-fcs-bg);color:var(--r-fcs)}
+.fields td:first-child{white-space:nowrap}
+.fields tr.sec td{font-weight:700;padding-top:10px;border-bottom:2px solid currentColor}
+.fields tr.sec.eth td{color:var(--r-eth)} .fields tr.sec.ip td{color:var(--r-ip)}
+.fields tr.sec.udp td{color:var(--r-udp)} .fields tr.sec.data td{color:var(--r-data)}
+.fields tr.sec.fcs td{color:var(--r-fcs)}
+.fields td.v{font-family:var(--f-mono);overflow-wrap:anywhere}
+.empty{padding:24px;text-align:center;color:var(--muted);border:1px dashed var(--line);border-radius:8px}
+.hist td{font-family:var(--f-mono)}
+.note{font-size:.8rem;color:var(--muted);max-width:75ch}
+.err{background:var(--ng-bg);color:var(--ng);padding:12px 16px;border-radius:8px}
+@media (prefers-reduced-motion:reduce){.led .lamp{transition:none}}
+</style>
+
+<div class="wrap">
+  <header class="bar">
+    <div>
+      <h1>μC3 / μNet3 UDP シミュレータ</h1>
+      <div class="sub">仮想電子基板(μC3 + μNet3 のアプリを WebAssembly で実行)と、仮想 Ethernet 受信機</div>
+    </div>
+    <div class="ctrl">
+      <span class="clock" id="clock" title="シミュレーション時刻(基板の起動からの経過時間)">00:00.000</span>
+      <button class="btn primary" id="btnRun" type="button">一時停止</button>
+      <span class="seg" role="group" aria-label="再生速度" id="speedSeg">
+        <button type="button" data-s="1" aria-pressed="true">×1</button>
+        <button type="button" data-s="2">×2</button>
+        <button type="button" data-s="5">×5</button>
+        <button type="button" data-s="10">×10</button>
+      </span>
+      <button class="btn" id="btnReset" type="button">リセット</button>
+    </div>
+  </header>
+
+  <div id="fatal" class="err" hidden></div>
+
+  <div class="grid">
+    <!-- ① 仮想電子基板 -->
+    <section class="dev" aria-labelledby="h-board">
+      <div class="devhead">
+        <h2 id="h-board">① 仮想電子基板</h2>
+        <span class="tag">μC3 (μITRON4.0) + μNet3</span>
+      </div>
+
+      <div class="pcb">
+        <div class="pcbtop">
+          <span class="silk">UDP-SIM BOARD REV.A</span>
+          <div class="chip">
+            <div class="ic">MCU<br>μC3 kernel</div>
+            <div class="ic">ETH PHY<br>μNet3</div>
+          </div>
+          <div class="rj45" title="Ethernet リンク">
+            <span class="silk">ETH</span>
+            <span class="jack"><span class="lnk" id="lnk"></span></span>
+          </div>
+        </div>
+        <div class="leds" id="leds"></div>
+        <div class="silk">LED5〜8 は ON / OFF ボタンで手動制御できます</div>
+      </div>
+
+      <dl class="kv">
+        <dt>自IPアドレス</dt><dd>172.16.17.10</dd>
+        <dt>自MACアドレス</dt><dd>02:00:00:AC:10:0A</dd>
+        <dt>送信先</dt><dd>239.200.10.100 : 62011(マルチキャスト)</dd>
+        <dt>送信元ポート</dt><dd>62011</dd>
+        <dt>送信回数</dt><dd id="txCount">0</dd>
+        <dt>次回送信カウンタ</dt><dd id="txNext">0x00000000</dd>
+      </dl>
+
+      <div>
+        <h3>LED 動作の判定(シミュレーション時刻で計測)</h3>
+        <div class="tscroll">
+          <table id="ledJudge">
+            <thead><tr><th>LED</th><th>トリガ</th><th class="num">周期 仕様/実測</th><th class="num">点灯 仕様/実測</th><th class="num">回数</th><th>判定</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div>
+        <h3>LED タイムライン(直近30秒)</h3>
+        <canvas id="tl" height="150" aria-label="LED1〜4 の点灯タイムライン"></canvas>
+      </div>
+
+      <div>
+        <h3>タスクの状態</h3>
+        <div class="tscroll">
+          <table id="tasks">
+            <thead><tr><th class="num">ID</th><th>タスク</th><th class="num">優先度</th><th>状態</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ② 仮想Ethernet受信機 -->
+    <section class="dev" aria-labelledby="h-rx">
+      <div class="devhead">
+        <h2 id="h-rx">② 仮想 Ethernet 受信機</h2>
+        <span class="tag">172.16.17.99 : 62011</span>
+      </div>
+
+      <dl class="kv">
+        <dt>自IPアドレス</dt><dd>172.16.17.99</dd>
+        <dt>自MACアドレス</dt><dd>02:00:00:AC:10:63</dd>
+        <dt>参加グループ</dt><dd>239.200.10.100(MAC 01:00:5E:48:0A:64)</dd>
+        <dt>受信ポート</dt><dd>62011 / UDP</dd>
+      </dl>
+
+      <div class="rxtop">
+        <div class="count"><span class="muted">次回の表示まで</span><span class="big" id="rxNext">--.-</span><span class="muted">秒</span></div>
+        <div class="count"><span class="muted">受信</span><span class="big" id="rxTotal">0</span><span class="muted">パケット</span></div>
+        <div class="verdict" id="rxVerdict"><span class="pill wait">受信待ち</span></div>
+      </div>
+
+      <div id="rxView"><div class="empty">20秒ごとに、その間に受信したUDPパケットのヘッダ〜データ部〜フッタ(FCS)を表示します。<br>基板は起動20秒後に最初のパケットを送信し、受信機は起動10秒後から20秒ごとに表示を更新します。</div></div>
+
+      <div>
+        <h3>表示履歴(カウンタの連続性)</h3>
+        <div class="tscroll">
+          <table class="hist" id="hist">
+            <thead><tr><th class="num">表示時刻</th><th class="num">受信数</th><th class="num">カウンタ</th><th class="num">前回との差</th><th>FCS</th><th>UDPチェックサム</th><th>連続性</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <p class="note">タスクの切り替えはサービスコールの呼び出し時とタイマティック(1ms)の境界で行います。基板のアプリ部(app_main.c)は μC3 / μNet3 のAPIだけで書かれており、互換層を製品版に差し替えると実機でビルドできます。動作には Microsoft Edge または Google Chrome のバージョン 137 以降が必要です。</p>
+</div>
+
+<script>
+"use strict";
+const WASM_B64 = "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KAKUr4GAAEEBaiIANgKUr4GAACABQbiJgIAAaiAANgIAIAFBmImAgABqIAFBlImAgABqKAIANgIADAELQVUhASAAQTxsQaSJgIAAaiIAKAIAIgJB/gFLDQEgACACQQFqNgIACxCLgICAAEEAIQELIAELogQBA38CQAJAQQAtAPCIgIAADQBBACgCoI2BgAAiAEUNAEEALQCojYGAAEEBcQ0AIABBPGxBmImAgABqIQECQEEALQC8iYCAAEUNAEEAKALAiYCAAEECRw0AQQAoAtSJgIAAIAEoAgBIDQILAkBBAC0A+ImAgABFDQBBACgC/ImAgABBAkcNAEEAKAKQioCAACABKAIASA0CCwJAQQAtALSKgIAARQ0AQQAoAriKgIAAQQJHDQBBACgCzIqAgAAgASgCAEgNAgsCQEEALQDwioCAAEUNAEEAKAL0ioCAAEECRw0AQQAoAoiLgIAAIAEoAgBIDQILAkBBAC0ArIuAgABFDQBBACgCsIuAgABBAkcNAEEAKALEi4CAACABKAIASA0CCwJAQQAtAOiLgIAARQ0AQQAoAuyLgIAAQQJHDQBBACgCgIyAgAAgASgCAEgNAgsCQEEALQCkjICAAEUNAEEAKAKojICAAEECRw0AQQAoAryMgIAAIAEoAgBIDQILQQAtAOCMgIAARQ0AQQAoAuSMgIAAQQJHDQBBACgC+IyAgAAgASgCAEgNAQsPCyAAQTxsIgFBrImAgABqQQA2AgAgAUGpiYCAAGpBADoAACABQYSJgIAAakECNgIAQQBBACgCkK+BgABBf2oiAjYCkK+BgAAgAUG4iYCAAGogAjYCACABQbSJgIAAakEANgIAQQBBADYCoI2BgAAgABCAgICAAAvkAQEFfwJAQQAtAPCIgIAADQBBACgCoI2BgAAiAEUNACAAQTxsIgFBhImAgABqIgJBEDYCAAJAIAFBpImAgABqIgMoAgAiBEUNACACQQI2AgAgAyAEQX9qNgIAIAFBqImAgABqQQE6AAAgAUGgiYCAAGpBADYCACABQayJgIAAakEANgIAIAFBqYmAgABqQQA6AABBAEEAKAKUr4GAAEEBaiICNgKUr4GAACABQbiJgIAAaiACNgIAIAFBmImAgABqIAFBlImAgABqKAIANgIAC0EAQQA2AqCNgYAAIAAQgICAgAALC7wBAQR/QWch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AGogAEEIdjoAACAEQaKwgYAAaiAAQRB2OgAAIARBo7CBgABqIABBGHY6AABBoLCBgAAgBEEEahCDgICAAEEAQQAoApC8gYAAQQFqNgKQvIGAACACCwsAQQAoApC8gYAACxUAQQBBADoAlLyBgABBABCEgICAAAt2AQF/AkAgAEF3akF4SQ0AQQEgAEF/anQhAAJAAkAQl4CAgAAiAUUNABCUgICAABoMAQsQk4CAgAAaC0EAQQAtAJS8gYAAIAByIgA6AJS8gYAAIABB/wFxEISAgIAAAkAgAUUNABCWgICAABoPCxCVgICAABoLC3kBAX8CQCAAQXdqQXhJDQBBASAAQX9qdCEAAkACQBCXgICAACIBRQ0AEJSAgIAAGgwBCxCTgICAABoLQQBBAC0AlLyBgAAgAEF/c3EiADoAlLyBgAAgAEH/AXEQhICAgAACQCABRQ0AEJaAgIAAGg8LEJWAgIAAGgsLSQEBfwJAIABBd2pBeEkNAEEAQQAtAJS8gYAAIgJBASAAQX9qIgB0ciACQX4gAHdxIAEbIgA6AJS8gYAAIABB/wFxEISAgIAACwsLKwEAQYAICyQyMzkuMjAwLjEwLjEwMAAAAgAArBAKAAAKERCsAP///wFAAAAAygQEbmFtZQALCmJvYXJkLndhc20BlQQtAAhzaW1fd2FpdAELc2ltX2xpbmtfdXACD3NpbV9hcnBfcmVzb2x2ZQMKc2ltX2V0aF90eAQMc2ltX2xlZF9wb3J0BQhNYWluVGFzawYNdWRwX3NlbmRfdGFzawcObGVkX2JsaW5rX3Rhc2sIDmN5Y193YWtldXBfaGRyCQdjcmVfdHNrCgdhY3RfdHNrCwtjaGtfcHJlZW1wdAwHZXh0X3Rzaw0Hc2xwX3Rzaw4Kd3VwX2NvbW1vbg8IaXd1cF90c2sQB2RseV90c2sRCGlzaWdfdGltEgdjcmVfY3ljEwdsb2NfY3B1FAhpbG9jX2NwdRUHdW5sX2NwdRYIaXVubF9jcHUXB3Nuc19jdHgYCHNpbV9pbml0GQhzaW1fdGljaxoHc2ltX25vdxsJc2ltX3NjaGVkHBNzaW1fdGFza19uZWVkX3N0YXJ0HRJzaW1fdGFza19zdGFja190b3AeEXNpbV9pc3Jfc3RhY2tfdG9wHw5zaW1fdGFza19zdGFydCAOc2ltX25leHRfZXZlbnQhDXNpbV90YXNrX2luZm8iB2lwX2F0b24jB25ldF9pbmkkC25ldF9kZXZfaW5pJQdjcmVfc29jJgdjb25fc29jJwdzbmRfc29jKBBzaW1fbmV0X3R4X2NvdW50KQhsZWRfaW5pdCoGbGVkX29uKwdsZWRfb2ZmLAtzaW1fbGVkX2N0bAcSAQAPX19zdGFja19wb2ludGVyCQoBAAcucm9kYXRhADgJcHJvZHVjZXJzAQxwcm9jZXNzZWQtYnkBDFVidW50dSBjbGFuZxExOC4xLjMgKDF1YnVudHUxKQAsD3RhcmdldF9mZWF0dXJlcwIrD211dGFibGUtZ2xvYmFscysIc2lnbi1leHQ=";
+
+/* ---------------- 定数 ---------------- */
+const RX_MAC  = [0x02,0x00,0x00,0xAC,0x10,0x63];
+const RX_IP   = 0xAC101163;                 /* 172.16.17.99 */
+const GROUP   = 0xEFC80A64;                 /* 239.200.10.100 */
+const GROUP_MAC = [0x01,0x00,0x5E,0x48,0x0A,0x64];
+const RX_PORT = 62011;
+const RX_PERIOD = 20000, RX_PHASE = 10000;  /* 受信機の表示周期と最初の表示時刻 */
+const LED_SPEC = [
+  {no:1, trig:"周期 1s",  period:1000,  on:200},
+  {no:2, trig:"周期 5s",  period:5000,  on:200},
+  {no:3, trig:"周期 10s", period:10000, on:200},
+  {no:4, trig:"UDP送信",  period:20000, on:500},
+];
+const TASK_NAMES = {1:"MainTask(初期化)",2:"LED1 タスク",3:"LED2 タスク",4:"LED3 タスク",5:"UDP 送信タスク"};
+const STAT_NAMES = {1:"実行",2:"実行可能",4:"待ち",8:"強制待ち",16:"休止"};
+const WAIT_NAMES = {0:"",1:"(起床待ち)",2:"(時間経過待ち)"};
+
+const $ = (id) => document.getElementById(id);
+const hex2 = (b) => b.toString(16).toUpperCase().padStart(2,"0");
+const hex = (v,n) => "0x" + (v>>>0).toString(16).toUpperCase().padStart(n,"0");
+const ipStr = (v) => [v>>>24,(v>>>16)&255,(v>>>8)&255,v&255].join(".");
+const macStr = (a) => Array.from(a, hex2).join(":");
+const fmtTime = (ms) => { const m=Math.floor(ms/60000), s=Math.floor(ms/1000)%60, f=ms%1000;
+  return String(m).padStart(2,"0")+":"+String(s).padStart(2,"0")+"."+String(f).padStart(3,"0"); };
+
+/* ---------------- 状態 ---------------- */
+let ex = null, memU8 = null, sp = null, startP = null, isrTop = 0;
+let resume = {}, yieldRes = null;
+let running = true, speed = 1, busy = false, lastReal = 0, gen = 0;
+let ledPort = 0, linkUp = false;
+let ledLog, ledStat, txCount, rxBuf, rxTotal, rxNextAt, hist, lastCounter, lastShown;
+
+function resetState(){
+  ledPort = 0; linkUp = false;
+  ledLog = [];                                  /* {t, port} */
+  ledStat = {}; for (const s of LED_SPEC) ledStat[s.no] = {lastOn:null, period:null, on:null, n:0};
+  txCount = 0; rxBuf = []; rxTotal = 0; rxNextAt = RX_PHASE; hist = []; lastCounter = null; lastShown = null;
+  resume = {}; yieldRes = null;
+}
+
+/* ---------------- WebAssembly(基板)とのやりとり ---------------- */
+const now = () => ex ? ex.sim_now() : 0;
+
+function onLedPort(v){
+  const t = now(), prev = ledPort; ledPort = v & 0xFF;
+  for (const s of LED_SPEC){
+    const bit = 1 << (s.no-1), st = ledStat[s.no];
+    if (!(prev & bit) && (ledPort & bit)) { if (st.lastOn !== null) st.period = t - st.lastOn; st.lastOn = t; st.n++; }
+    if ((prev & bit) && !(ledPort & bit) && st.lastOn !== null) st.on = t - st.lastOn;
+  }
+  ledLog.push({t, port: ledPort});
+  if (ledLog.length > 4000) ledLog.splice(0, 2000);
+}
+
+function onEthTx(ptr, len){
+  const frame = memU8.slice(ptr, ptr + len);     /* 仮想ケーブルへ送出 */
+  txCount++;
+  receiverInput(frame, now());
+}
+
+function arpResolve(ip, macPtr){                 /* 仮想LAN上の既知ホスト */
+  if (ip === RX_IP){ memU8.set(RX_MAC, macPtr); return 1; }
+  return 0;
+}
+
+async function boot(){
+  const g = ++gen;
+  resetState();
+  const bytes = Uint8Array.from(atob(WASM_B64), c => c.charCodeAt(0));
+  const env = {
+    sim_wait: new WebAssembly.Suspending(async (id) => {
+      const saved = sp.value;
+      const p = new Promise(r => { resume[id] = r; });
+      const y = yieldRes; yieldRes = null; if (y) y();
+      await p;
+      sp.value = saved;                          /* 再開したタスクのスタックに戻す */
+    }),
+    sim_led_port: (v) => onLedPort(v),
+    sim_eth_tx: (p, n) => onEthTx(p, n),
+    sim_link_up: () => { linkUp = true; },
+    sim_arp_resolve: (ip, p) => arpResolve(ip >>> 0, p),
+  };
+  const { instance } = await WebAssembly.instantiate(bytes, { env });
+  if (g !== gen) return;
+  ex = instance.exports; memU8 = new Uint8Array(ex.memory.buffer); sp = ex.__stack_pointer;
+  startP = WebAssembly.promising(ex.sim_task_start);
+  isrTop = ex.sim_isr_stack_top();
+  sp.value = isrTop;
+  ex.sim_init();
+  await runReady();
+}
+
+function runTask(id){
+  return new Promise((res) => {
+    yieldRes = res;
+    if (ex.sim_task_need_start(id)) {
+      sp.value = ex.sim_task_stack_top(id);
+      startP(id).then(() => { const y = yieldRes; yieldRes = null; if (y) y(); });
+    } else {
+      const r = resume[id]; resume[id] = null;
+      if (r) r(); else res();
+    }
+  });
+}
+
+async function runReady(){
+  let id;
+  while ((id = ex.sim_sched())) await runTask(id);
+}
+
+/* ms ミリ秒ぶんシミュレーション時間を進める */
+async function advance(ms){
+  const g = gen;
+  for (let i = 0; i < ms && g === gen; i++){
+    sp.value = isrTop;
+    ex.sim_tick();
+    await runReady();
+    receiverTick(now());
+  }
+}
+
+/* ---------------- ② 受信機 ---------------- */
+function crc32(buf){
+  let c = 0xFFFFFFFF;
+  for (let i = 0; i < buf.length; i++){ c ^= buf[i]; for (let k = 0; k < 8; k++) c = (c & 1) ? (c >>> 1) ^ 0xEDB88320 : c >>> 1; }
+  return (~c) >>> 0;
+}
+function csum(bytes){ let s = 0; for (let i = 0; i < bytes.length; i += 2) s += (bytes[i] << 8) | (bytes[i+1] ?? 0);
+  while (s >>> 16) s = (s & 0xFFFF) + (s >>> 16); return s; }
+
+function decode(f){
+  const u16 = (o) => (f[o] << 8) | f[o+1];
+  const u32 = (o) => ((f[o] << 24) | (f[o+1] << 16) | (f[o+2] << 8) | f[o+3]) >>> 0;
+  const d = { len: f.length };
+  d.dst = f.slice(0,6); d.src = f.slice(6,12); d.type = u16(12);
+  const ip = 14; d.ihl = (f[ip] & 15) * 4; d.ver = f[ip] >> 4; d.tos = f[ip+1];
+  d.tot = u16(ip+2); d.id = u16(ip+4); d.frag = u16(ip+6); d.ttl = f[ip+8]; d.proto = f[ip+9];
+  d.ipcs = u16(ip+10); d.sip = u32(ip+12); d.dip = u32(ip+16);
+  d.ipcsOk = csum(f.slice(ip, ip + d.ihl)) === 0xFFFF;
+  const udp = ip + d.ihl; d.udpOff = udp;
+  d.sport = u16(udp); d.dport = u16(udp+2); d.ulen = u16(udp+4); d.ucs = u16(udp+6);
+  const pl = udp + 8; d.plOff = pl; d.plLen = d.ulen - 8;
+  d.payload = f.slice(pl, pl + d.plLen);
+  d.counter = u32(pl);
+  const ps = new Uint8Array(12 + d.ulen);
+  ps.set(f.slice(ip+12, ip+20), 0); ps[9] = 17; ps[10] = d.ulen >> 8; ps[11] = d.ulen & 255;
+  ps.set(f.slice(udp, udp + d.ulen), 12);
+  d.ucsOk = d.ucs === 0 || csum(ps) === 0xFFFF;
+  d.fcsOff = f.length - 4;
+  d.fcs = (f[d.fcsOff] | (f[d.fcsOff+1] << 8) | (f[d.fcsOff+2] << 16) | (f[d.fcsOff+3] << 24)) >>> 0;
+  d.fcsCalc = crc32(f.slice(0, d.fcsOff));
+  d.fcsOk = d.fcs === d.fcsCalc;
+  d.padLen = d.fcsOff - (14 + d.tot);
+  return d;
+}
+
+function receiverInput(f, t){
+  /* MACフィルタ:自MAC / 参加グループ / ブロードキャスト */
+  const dst = f.slice(0,6);
+  const eq = (a,b) => a.every((x,i) => x === b[i]);
+  if (!(eq(dst, RX_MAC) || eq(dst, GROUP_MAC) || dst.every(x => x === 0xFF))) return;
+  if (f.length < 64) return;
+  const d = decode(f);
+  if (d.type !== 0x0800 || d.proto !== 17) return;
+  if (!(d.dip === RX_IP || d.dip === GROUP || d.dip === 0xFFFFFFFF)) return;
+  if (d.dport !== RX_PORT) return;
+  rxTotal++;
+  rxBuf.push({ t, frame: f, d });
+}
+
+function receiverTick(t){
+  if (t < rxNextAt) return;
+  const pkts = rxBuf; rxBuf = [];
+  const entry = { t: rxNextAt, pkts };
+  for (const p of pkts){
+    const diff = lastCounter === null ? null : ((p.d.counter - lastCounter) >>> 0);
+    p.diff = diff;
+    p.cont = (diff === null) ? (p.d.counter === 0 ? "first0" : "first") : (diff === 1 ? "ok" : "ng");
+    lastCounter = p.d.counter;
+  }
+  hist.unshift(entry);
+  if (hist.length > 200) hist.pop();
+  if (pkts.length) lastShown = { t: rxNextAt, pkts };
+  rxNextAt += RX_PERIOD;
+  renderRx(entry);
+}
+
+/* ---------------- 描画 ---------------- */
+function buildLeds(){
+  const funcs = ["1s","5s","10s","UDP","","","",""];
+  const box = $("leds"); box.innerHTML = "";
+  for (let i = 1; i <= 8; i++){
+    const el = document.createElement("div"); el.className = "led"; el.id = "led" + i;
+    el.innerHTML = `<span class="lamp"></span><span class="nm">LED${i}</span><span class="fn">${funcs[i-1]}</span>`;
+    if (i >= 5){
+      const b = document.createElement("button"); b.type = "button"; b.id = "ledbtn" + i; b.textContent = "ON / OFF";
+      b.addEventListener("click", () => { if (!ex) return; sp.value = isrTop; ex.sim_led_ctl(i, (ledPort >> (i-1)) & 1 ? 0 : 1); });
+      el.appendChild(b);
+    }
+    box.appendChild(el);
+  }
+}
+
+function judgeRow(s){
+  const st = ledStat[s.no];
+  const p = st.period, o = st.on;
+  let v;
+  if (st.n < 2 || o === null) v = `<span class="pill wait">計測中</span>`;
+  else if (p === s.period && o === s.on) v = `<span class="pill ok">合格</span>`;
+  else v = `<span class="pill ng">不一致</span>`;
+  const ms = (x) => x === null ? "—" : x + "ms";
+  return `<tr><td>LED${s.no}</td><td>${s.trig}</td><td class="num">${s.period}ms / ${ms(p)}</td><td class="num">${s.on}ms / ${ms(o)}</td><td class="num">${st.n}</td><td>${v}</td></tr>`;
+}
+
+let lastPanel = 0;
+function renderBoard(){
+  const t = now();
+  $("clock").textContent = fmtTime(t);
+  for (let i = 1; i <= 8; i++) $("led"+i).classList.toggle("on", !!((ledPort >> (i-1)) & 1));
+  $("lnk").classList.toggle("on", linkUp);
+  $("rxNext").textContent = Math.max(0, (rxNextAt - t) / 1000).toFixed(1);
+  drawTimeline(t);
+  const rn = performance.now();
+  if (rn - lastPanel < 200) return;
+  lastPanel = rn;
+  $("txCount").textContent = txCount;
+  $("rxTotal").textContent = rxTotal;
+  $("txNext").textContent = hex(txCount, 8);
+  $("ledJudge").tBodies[0].innerHTML = LED_SPEC.map(judgeRow).join("");
+  let rows = "";
+  for (let id = 1; id <= 8; id++){
+    const inf = ex ? ex.sim_task_info(id) : 0; if (!inf) continue;
+    const st = inf & 0xFF, pri = (inf >> 8) & 0xFF, wk = (inf >> 16) & 0xFF;
+    rows += `<tr><td class="num">${id}</td><td>${TASK_NAMES[id] ?? "TASK"+id}</td><td class="num">${pri}</td><td>${STAT_NAMES[st] ?? st}${st===4 ? WAIT_NAMES[wk] : ""}</td></tr>`;
+  }
+  $("tasks").tBodies[0].innerHTML = rows;
+}
+
+function cssVar(n){ return getComputedStyle(document.documentElement).getPropertyValue(n).trim(); }
+function drawTimeline(t){
+  const cv = $("tl"), dpr = window.devicePixelRatio || 1;
+  const w = cv.clientWidth, h = 150;
+  if (cv.width !== Math.round(w*dpr)) { cv.width = Math.round(w*dpr); cv.height = Math.round(h*dpr); }
+  const c = cv.getContext("2d"); c.setTransform(dpr,0,0,dpr,0,0); c.clearRect(0,0,w,h);
+  const span = 30000, left = 46, right = w - 8, t0 = t - span;
+  const X = (tt) => left + (tt - t0) / span * (right - left);
+  const fg = cssVar("--fg"), muted = cssVar("--muted"), line = cssVar("--line"), on = cssVar("--led-on");
+  c.font = "11px " + cssVar("--f-mono"); c.textBaseline = "middle";
+  /* 目盛り:5秒ごと */
+  c.strokeStyle = line; c.fillStyle = muted; c.lineWidth = 1;
+  const first = Math.ceil(Math.max(0,t0) / 5000) * 5000;
+  for (let g = first; g <= t; g += 5000){ const x = X(g); c.beginPath(); c.moveTo(x,6); c.lineTo(x,h-18); c.stroke();
+    c.textAlign = "center"; c.fillText((g/1000)+"s", x, h-8); }
+  for (let k = 0; k < 4; k++){
+    const y0 = 14 + k*30, yHi = y0, yLo = y0 + 16;
+    c.fillStyle = fg; c.textAlign = "left"; c.fillText("LED"+(k+1), 4, y0 + 8);
+    const bit = 1 << k;
+    /* 期間の開始時点の状態 */
+    let state = 0;
+    for (const e of ledLog){ if (e.t <= t0) state = (e.port & bit) ? 1 : 0; else break; }
+    c.strokeStyle = on; c.lineWidth = 2; c.beginPath();
+    let x = left, y = state ? yHi : yLo; c.moveTo(x, y);
+    for (const e of ledLog){
+      if (e.t <= t0) continue;
+      const s = (e.port & bit) ? 1 : 0; if (s === state) continue;
+      const xe = X(e.t); c.lineTo(xe, y); y = s ? yHi : yLo; c.lineTo(xe, y); state = s;
+    }
+    c.lineTo(right, y); c.stroke();
+  }
+}
+
+const fieldRow = (name, val, note) => `<tr><td>${name}</td><td class="v">${val}</td><td class="muted">${note ?? ""}</td></tr>`;
+
+function renderFrame(p){
+  const d = p.d, f = p.frame;
+  /* 16進ダンプ(領域ごとに色分け) */
+  const cls = (i) => i < 14 ? "g-eth" : i < d.udpOff ? "g-ip" : i < d.plOff ? "g-udp"
+                 : i < d.plOff + 4 ? "g-cnt" : i < d.fcsOff ? "g-data" : "g-fcs";
+  let dump = "";
+  for (let r = 0; r < f.length; r += 16){
+    dump += `<span class="off">${r.toString(16).toUpperCase().padStart(4,"0")}</span>  `;
+    for (let i = r; i < Math.min(r+16, f.length); i++) dump += `<b class="${cls(i)}">${hex2(f[i])}</b>` + (i % 16 === 7 ? "  " : " ");
+    dump += "\n";
+  }
+  const cont = p.cont === "ok" ? `<span class="pill ok">連続(+1)</span>`
+             : p.cont === "ng" ? `<span class="pill ng">不連続(差 ${p.diff})</span>`
+             : `<span class="pill ok">初回受信</span>`;
+  const okp = (b) => b ? `<span class="pill ok">OK</span>` : `<span class="pill ng">NG</span>`;
+  const fields =
+    `<tr class="sec eth"><td colspan="3">Ethernet II ヘッダ(14 バイト)</td></tr>` +
+    fieldRow("宛先MAC", macStr(d.dst), "マルチキャスト 239.200.10.100 に対応") +
+    fieldRow("送信元MAC", macStr(d.src), "仮想電子基板") +
+    fieldRow("EtherType", hex(d.type,4), "IPv4") +
+    `<tr class="sec ip"><td colspan="3">IPv4 ヘッダ(${d.ihl} バイト)</td></tr>` +
+    fieldRow("バージョン / ヘッダ長", `${d.ver} / ${d.ihl} バイト`) +
+    fieldRow("TOS", hex(d.tos,2)) +
+    fieldRow("全長", `${d.tot} バイト`, "IPヘッダ + UDPヘッダ + データ") +
+    fieldRow("識別子", `${hex(d.id,4)} (${d.id})`) +
+    fieldRow("フラグ / オフセット", hex(d.frag,4), "フラグメントなし") +
+    fieldRow("TTL", d.ttl, "同一LAN内に限定") +
+    fieldRow("プロトコル", `${d.proto}`, "UDP") +
+    fieldRow("ヘッダチェックサム", hex(d.ipcs,4), okp(d.ipcsOk)) +
+    fieldRow("送信元IP", ipStr(d.sip)) +
+    fieldRow("宛先IP", ipStr(d.dip), "マルチキャストグループ") +
+    `<tr class="sec udp"><td colspan="3">UDP ヘッダ(8 バイト)</td></tr>` +
+    fieldRow("送信元ポート", d.sport) +
+    fieldRow("宛先ポート", d.dport) +
+    fieldRow("長さ", `${d.ulen} バイト`, "UDPヘッダ + データ") +
+    fieldRow("チェックサム", hex(d.ucs,4), okp(d.ucsOk)) +
+    `<tr class="sec data"><td colspan="3">データ部(${d.plLen} バイト)</td></tr>` +
+    fieldRow("送信カウンタ(先頭4バイト)", `${hex(d.counter,8)} (${d.counter})`, cont) +
+    fieldRow("残り", `${d.plLen - 4} バイト`, "すべて 0x00") +
+    `<tr class="sec fcs"><td colspan="3">フッタ:FCS(4 バイト)</td></tr>` +
+    fieldRow("FCS(受信値)", hex(d.fcs,8), "下位バイトから送出") +
+    fieldRow("FCS(再計算)", hex(d.fcsCalc,8), okp(d.fcsOk));
+  return `<div class="frame">
+    <div class="framehead"><strong>受信時刻 ${fmtTime(p.t)}  フレーム長 ${d.len} バイト(FCS込み)</strong>
+      <span class="legend"><span class="g-eth">Ethernet</span><span class="g-ip">IPv4</span><span class="g-udp">UDP</span><span class="g-cnt">カウンタ</span><span class="g-data">データ</span><span class="g-fcs">FCS</span></span></div>
+    <div class="dump">${dump}</div>
+    <div class="tscroll"><table class="fields"><thead><tr><th>フィールド</th><th>値</th><th>備考</th></tr></thead><tbody>${fields}</tbody></table></div>
+  </div>`;
+}
+
+function renderRx(entry){
+  $("rxTotal").textContent = rxTotal;
+  /* 判定ピル */
+  const all = hist.flatMap(h => h.pkts);
+  const ng = all.some(p => p.cont === "ng" || !p.d.fcsOk || !p.d.ucsOk || !p.d.ipcsOk);
+  $("rxVerdict").innerHTML = all.length === 0 ? `<span class="pill wait">受信待ち</span>`
+    : ng ? `<span class="pill ng">異常あり</span>`
+    : `<span class="pill ok">カウンタ連続・FCS正常(${all.length}件)</span>`;
+  /* 最新の表示 */
+  const view = $("rxView");
+  if (entry.pkts.length === 0){
+    view.innerHTML = `<div class="empty">${fmtTime(entry.t)} の表示:この20秒間に受信したパケットはありません。</div>` +
+      (lastShown ? `<p class="note">前回(${fmtTime(lastShown.t)})の表示</p>` + lastShown.pkts.map(renderFrame).join("") : "");
+  } else {
+    view.innerHTML = `<p class="note">${fmtTime(entry.t)} の表示(この20秒間に ${entry.pkts.length} パケット受信)</p>` + entry.pkts.map(renderFrame).join("");
+  }
+  /* 履歴 */
+  $("hist").tBodies[0].innerHTML = hist.slice(0, 50).map(h => {
+    if (!h.pkts.length) return `<tr><td class="num">${fmtTime(h.t)}</td><td class="num">0</td><td class="num">—</td><td class="num">—</td><td>—</td><td>—</td><td><span class="pill wait">受信なし</span></td></tr>`;
+    return h.pkts.map(p => `<tr><td class="num">${fmtTime(h.t)}</td><td class="num">${h.pkts.length}</td><td class="num">${hex(p.d.counter,8)}</td><td class="num">${p.diff === null ? "—" : "+" + p.diff}</td><td>${p.d.fcsOk ? '<span class="pill ok">OK</span>' : '<span class="pill ng">NG</span>'}</td><td>${p.d.ucsOk ? '<span class="pill ok">OK</span>' : '<span class="pill ng">NG</span>'}</td><td>${p.cont === "ng" ? '<span class="pill ng">不連続</span>' : '<span class="pill ok">' + (p.cont === "ok" ? "連続" : "初回") + '</span>'}</td></tr>`).join("");
+  }).join("");
+}
+
+/* ---------------- メインループ ---------------- */
+async function frame(ts){
+  if (running && ex && !busy){
+    const dt = lastReal ? Math.min(ts - lastReal, 200) : 0;
+    const ms = Math.round(dt * speed);
+    if (ms > 0){ busy = true; try { await advance(ms); } finally { busy = false; } }
+  }
+  lastReal = ts;
+  if (ex) renderBoard();
+  requestAnimationFrame(frame);
+}
+
+function fatal(msg){ const e = $("fatal"); e.textContent = msg; e.hidden = false; running = false; }
+
+$("btnRun").addEventListener("click", () => { running = !running; $("btnRun").textContent = running ? "一時停止" : "再開"; lastReal = 0; });
+$("speedSeg").addEventListener("click", (e) => {
+  const b = e.target.closest("button"); if (!b) return;
+  speed = Number(b.dataset.s);
+  for (const x of $("speedSeg").children) x.setAttribute("aria-pressed", String(x === b));
+});
+$("btnReset").addEventListener("click", async () => {
+  ex = null;
+  $("rxView").innerHTML = `<div class="empty">リセットしました。基板を再起動しています。</div>`;
+  $("hist").tBodies[0].innerHTML = ""; $("rxTotal").textContent = "0";
+  $("rxVerdict").innerHTML = `<span class="pill wait">受信待ち</span>`;
+  await boot(); lastReal = 0;
+});
+
+/* 自動テスト用フック */
+window.__sim = {
+  pause(){ running = false; },
+  async runFor(ms){ running = false; while (busy) await new Promise(r => setTimeout(r, 5)); await advance(ms); renderBoard(); },
+  state(){ return { t: now(), ledStat, txCount, rxTotal, hist: hist.map(h => ({ t: h.t, pkts: h.pkts.map(p => ({ counter: p.d.counter, diff: p.diff, cont: p.cont, fcsOk: p.d.fcsOk, ucsOk: p.d.ucsOk, ipcsOk: p.d.ipcsOk, len: p.d.len, frame: Array.from(p.frame) })) })) }; },
+  ledLog(){ return ledLog; },
+};
+
+buildLeds();
+if (typeof WebAssembly === "undefined" || typeof WebAssembly.Suspending !== "function" || typeof WebAssembly.promising !== "function"){
+  fatal("このブラウザは WebAssembly の JSPI(JavaScript Promise Integration)に対応していません。Microsoft Edge または Google Chrome のバージョン 137 以降で開いてください。");
+} else {
+  boot().then(() => requestAnimationFrame(frame)).catch(e => fatal("起動に失敗しました: " + e));
+}
+</script>
+
+</body>
+</html>
